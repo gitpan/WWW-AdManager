@@ -73,6 +73,10 @@ each campaign, the admanager randomizes the display of images, and tracks both
 "page impressions" - i.e. the number of times the image is displayed - and
 "clickthroughs" - i.e. the number of times the image is clicked on.
 
+The module also provides an administration web interface, which can be served
+through a access restricted URL, for creating and updating campaigns and
+adverts, and displaying usage stats.
+
 The interface support implementation both through CGI and mod_perl. mod_perl is
 highly recommended, especially where there are more than one adver to display
 per page.
@@ -133,7 +137,7 @@ use vars qw( $VERSION %OPTIONS $WINDOW_PADDING $MAX_MARGIN );
 
 $WINDOW_PADDING = 20;
 $MAX_MARGIN = 20;
-$VERSION = '0.004';
+$VERSION = '0.005';
 
 #==============================================================================
 #
