@@ -3,6 +3,15 @@
 # CVS Log
 #
 # $Log: AdManager.pm,v $
+# Revision 1.13  2001/10/26 14:40:52  wrigley
+# v0.006
+#
+# Revision 1.12  2001/10/10 17:14:18  wrigley
+# various bug fixes: new image is based on max ad no., not nads; alt text is included in new advert; ads with no ct URL are rendered as non-clickable
+#
+# Revision 1.11  2001/08/29 14:56:37  wrigley
+# v0.004
+#
 # Revision 1.10  2001/08/24 17:39:39  wrigley
 # v0.004
 #
@@ -137,7 +146,7 @@ use vars qw( $VERSION %OPTIONS $WINDOW_PADDING $MAX_MARGIN );
 
 $WINDOW_PADDING = 20;
 $MAX_MARGIN = 20;
-$VERSION = '0.005';
+$VERSION = '0.006';
 
 #==============================================================================
 #
@@ -423,6 +432,7 @@ sub _log_entry
     my $type = shift;
     my $n = shift;
 
+    return unless $self->{ads}{log_usage};
     my $fh = _untaint_and_open( $self->{logfile}, 'a' )
         or die "can't write to $self->{logfile}\n"
     ;
@@ -487,10 +497,15 @@ sub _get_width
     for my $ad ( $self->_get_ads() )
     {
         my $w = $ad->{size}[0];
-        $w += 2 * $self->{ads}{margin} if $self->{ads}{margin};
         $width = $w > $width ? $w : $width;
     }
     $width *= $self->{ads}{nads} if $self->{ads}{nads};
+
+    if ( $self->{ads}{margin} )
+    {
+        my $nmargins = $self->{ads}{nads} - 1;
+        $width += $nmargins * $self->{ads}{margin};
+    }
     return $width;
 }
 
@@ -507,10 +522,27 @@ sub _get_height
     for my $ad ( $self->_get_ads() )
     {
         my $h = $ad->{size}[1];
-        $h += 2 * $self->{ads}{margin} if $self->{ads}{margin};
         $height = $h > $height ? $h : $height;
     }
     return $height;
+}
+
+#------------------------------------------------------------------------------
+#
+# _get_max_adno - get the max. ad no.
+#
+#------------------------------------------------------------------------------
+
+sub _get_max_adno
+{ 
+    my $self = shift;
+
+    my $max = -1;
+    for my $ad ( $self->_get_ads() )
+    {
+        $max = $ad->{n} if $ad->{n} > $max;
+    }
+    return $max;
 }
 
 #------------------------------------------------------------------------------
@@ -629,12 +661,13 @@ sub _current_campaign_actions_as_html
     my $self = shift;
 
     return '' unless $self->{campaign_path};
-    my $nads = $self->_get_nads();
+    my $add_ad = $self->_get_max_adno() + 1;
     my $html = <<EOF;
 <h2>Current Campaign ($self->{campaign_path})</h2>
 <p>
-    <a href="$self->{admin_url}?add=$nads">Add a new advert</a>
+    <a href="$self->{admin_url}?add=$add_ad">Add a new advert</a>
 EOF
+    my $nads = $self->_get_nads();
     if ( $nads )
     {
         my $h = $self->_get_height( $self->{campaign_path} );
@@ -642,7 +675,7 @@ EOF
         my $width = $w + $WINDOW_PADDING;
         my $height = $h + $WINDOW_PADDING;
         $html .= <<EOF;
-    | <a href="$self->{admin_url}?log=1">View the usage log</a>
+    | <a href="$self->{admin_url}?display_log=1">View the usage log</a>
     | <a 
         target="_blank" 
         href="$self->{ADMANAGER_URL}/$self->{campaign_path}"
@@ -654,8 +687,7 @@ EOF
             );
             return false;
         "
-    >Test the
-    campaign</a>
+    >Test the campaign</a>
 EOF
     }
     my $url = 
@@ -689,7 +721,7 @@ sub _ad_info_as_html
     my $nw = $ad->{nw} ? 'Yes' : 'No';
     my $alt = $ad->{alt} || '';
     my $size = join( 'x', @{$ad->{size}}[0,1] );
-    my $ad_as_html = $self->_ad_as_html( $n );
+    my $ad_as_html = $self->_ad_as_html( $n, 1 );
     return <<EOF;
 <table>
     <tr>
@@ -754,10 +786,29 @@ sub _all_ads_info_as_html
 {
     my $self = shift;
     
-    my $html = <<EOF;
+    my $log_usage = $self->{ads}{log_usage};
+    my $html = sprintf( <<EOF, $log_usage ? 'selected' : '', $log_usage ? '' : 'selected' );
 <table cellpadding="5">
     <tr>
     <form>
+        <td>
+            <b>Log usage:</b>
+        </td>
+        <td>
+            <select name="log_usage">
+                <option %s value="1"> Yes
+                <option %s value="0"> No
+            </select>
+        </td>
+        <td>
+            <input type="submit" name="action" value="change log usage">
+        </td>
+    </tr>
+    <form>
+EOF
+    $html .= <<EOF;
+    <form>
+    <tr>
         <td>
             <b>No. of ads to display:</b>
         </td>
@@ -832,17 +883,25 @@ sub _ads_info_as_html
     my $self = shift;
 
     my $nads = $self->_get_nads();
-    return '' unless $nads;
+    my $colspan = 2 + $self->{ads}{log_usage};
     my $html = <<EOF;
 <h2>Adverts</h2>
 <table border="1" cellpadding="5">
     <tr>
-        <th>Advert</th>
-        <th>Usage Stats</th>
-        <th>Action</th>
+        <th colspan="$colspan">All Adverts</th>
+    </tr>
+    <tr>
+        <td colspan="$colspan">
+EOF
+    $html .= $self->_all_ads_info_as_html() . <<EOF;
+        </td>
     </tr>
 EOF
-    for my $ad ( $self->_get_ads() )
+    return $html . "</table>" unless $nads;
+    $html .= "<tr><th>Advert</th>";
+    $html .= "<th>Usage Stats</th>" if $self->{ads}{log_usage};
+    $html .= " <th>Action</th></tr>";
+    for my $ad ( sort { $a->{n} <=> $b->{n} } $self->_get_ads() )
     {
         $html .= <<EOF;
     <tr>
@@ -851,29 +910,21 @@ EOF
         $html .= $self->_ad_info_as_html( $ad );
         $html .= <<EOF;
         </td>
-        <td valign="top">
 EOF
-        $html .= $self->_ad_stats_as_html( $ad );
+        $html .= 
+            qq{<td valign="top">} .
+            $self->_ad_stats_as_html( $ad ) .
+            qq{</td>}
+            if $self->{ads}{log_usage};
         $html .= <<EOF;
-        </td>
         <td valign="top">
             <a href="$self->{admin_url}?edit=$ad->{n}">Edit</a> |
             <a href="$self->{admin_url}?action=delete_ad&ad=$ad->{n}">Delete</a>
         </td>
     </tr>
-    <tr>
-        <th colspan="3">All Adverts</th>
-    </tr>
-    <tr>
-        <td colspan="3">
 EOF
     }
-    $html .= $self->_all_ads_info_as_html() . <<EOF;
-        </td>
-    </tr>
-</table>
-EOF
-
+    $html .= "</table>";
     return $html;
 }
 
@@ -920,6 +971,24 @@ sub _main_admin_interface
         $self->_ads_info_as_html() .
         $self->_ssi_code_as_html()
     ;
+}
+
+#------------------------------------------------------------------------------
+#
+# _change_log_usage - change the "log" attribute for the current campaign to
+# the value stored in the formdata hash. The log attribute determined whether
+# usage is logged for this campaign.
+#
+#------------------------------------------------------------------------------
+
+sub _change_log_usage
+{
+    my $self = shift;
+    my $log_usage = $self->{formdata}{log_usage};
+    return unless defined $log_usage;
+    warn "Changing log_usage to $log_usage\n";
+    $self->{ads}{log_usage} = $log_usage;
+    $self->_write_data;
 }
 
 #------------------------------------------------------------------------------
@@ -989,20 +1058,29 @@ sub _add_ad
     my $img = $self->{formdata}{img};
     my $ct = $self->{formdata}{ct};
     my $ad = $self->{formdata}{ad};
+    my $alt = $self->{formdata}{alt};
     $img or die "No img param\n";
-    $ct or die "no ct param\n";
+    defined( $ct ) or die "no ct param\n";
     defined( $ad ) or die "no ad param\n";
 
     my @size = $self->_get_imagesize( $img );
-    warn "Adding ad (no $ad): $img $ct (@size)\n";
-    my $nads = $self->_get_nads();
-    if ( $img and $ct and defined( $ad ) and $ad == $nads )
+    my $ad_add = $self->_get_max_adno() + 1;
+    if ( $img and $ct and defined( $ad ) and $ad == $ad_add )
     {
+        warn "Adding ad (no $ad): $img $ct (@size)\n";
         $self->{ads}{$ad} =
-            { ct => $ct, img => $img, size => \@size, n => $ad }
+            { alt => $alt, ct => $ct, img => $img, size => \@size, n => $ad }
         ;
+        $self->_write_data;
     }
-    $self->_write_data;
+    else
+    {
+        warn "Error: $ad != $ad_add\n";
+        for my $ad ( $self->_get_ads )
+        {
+            warn "\t$ad->{n}\n";
+        }
+    }
 }
 
 #------------------------------------------------------------------------------
@@ -1023,7 +1101,7 @@ sub _edit_ad
     my $nw = $self->{formdata}{nw};
     my $alt = $self->{formdata}{alt};
     $img or die "No img param\n";
-    $ct or die "no ct param\n";
+    defined( $ct ) or die "no ct param\n";
     defined( $ad ) or die "no ad param\n";
 
     $self->{ads}{$ad}{ct} = $ct;
@@ -1080,7 +1158,7 @@ sub _create_campaign
         mkpath( $datadir ) or die "Can't create $datadir\n";
     }
     $self->{datafile} = "$datadir/admanager.pl";
-    $self->{ads} = {};
+    $self->{ads} = { log_usage => 1 };
     $self->_write_data;
 }
 
@@ -1219,39 +1297,59 @@ sub _ad_as_html
 {
     my $self = shift;
     my $n = shift;
+    my $first = shift;
 
     my $campaign_path = $self->{campaign_path};
     my $ad = $self->{ads}{$n};
     my $img = $ad->{img};
     my $size = $ad->{size};
     my $size_str = $size ? "width=\"$size->[0]\" height=\"$size->[1]\"" : '';
-    my $rand = $$ . time . rand(1000);
     my $url = $self->{ADMANAGER_URL};
     $url =~ s/$self->{path_info}$// if $self->{path_info};
     $url .= "/$campaign_path";
-    my $img_name = encode_entities( $campaign_path . $n );
-    $img_name =~ tr/a-zA-Z0-9/_/c;
-    my $margin = $self->{ads}{margin} || 0;
-    my $style = 
-        qq{style="border:0px} .
-        ( $margin ? ";margin:${margin}px" : '' ) .
-        '"'
-    ;
-    my $target = $ad->{nw} ? 'target="_blank"' : '';
-    my $ct_url = "$url?ct=$n&amp;rand=$rand";
+    my $alt = $ad->{alt} || "$campaign_path advert no. $n";
+    my $rand = $$ . time . rand(1000);
     my $img_url = 
         $self->{REDIRECT_PAGE_IMPRESSIONS} ? 
             "$url?img=$n&amp;rand=$rand" : "$img?$rand"
     ;
-    my $alt = $ad->{alt} || "$campaign_path advert no. $n";
-    my $html = 
-        join( '',
-            qq{<!-- advert no $n from campaign $campaign_path -->},
-            qq{<a $target href="$ct_url">},
-            qq{<img alt="$alt" $size_str $style src="$img_url" />},
-            qq{</a>},
-    );
-    return $html;
+    my $margin = $self->{ads}{margin} || 0;
+    my $user_agent = $ENV{HTTP_USER_AGENT};
+    if ( 
+        $user_agent !~ /compatible/ and 
+        $user_agent =~ m!Mozilla/4!
+    )
+    {
+        $margin += $size->[0];
+    }
+    my $style = $first ? '' : "style=\"margin-left:${margin}px;\"";
+    if ( $ad->{ct} )
+    {
+        my $target = $ad->{nw} ? 'target="_blank"' : '';
+        my $ct_url = "$url?ct=$n&amp;rand=$rand";
+        return <<EOF;
+<!-- user agent $user_agent -->
+<!-- advert no $n from campaign $campaign_path -->
+<a 
+    $target 
+    $style 
+    href="$ct_url"
+><img 
+        alt="$alt" 
+        border="0" 
+        $size_str 
+        src="$img_url" 
+/></a>
+EOF
+    }
+    else
+    {
+        return
+            join( '',
+                qq{<!-- advert no $n from campaign $campaign_path -->},
+                qq{<img alt="$alt" $size_str $style src="$img_url" />}
+        );
+    }
 }
 
 #------------------------------------------------------------------------------
@@ -1265,7 +1363,7 @@ sub _random_ad_as_html
 {
     my $self = shift;
 
-    my $html = '';
+    my @html;
     my $nads = $self->{ads}{nads} || 1;
     my @ad_keys = $self->_get_ad_keys();
 
@@ -1278,10 +1376,12 @@ sub _random_ad_as_html
         $self->_log_entry( 'img', $n ) 
             unless $self->{REDIRECT_PAGE_IMPRESSIONS}
         ;
-        $html .= $self->_ad_as_html( $n );
+        push( @html, $self->_ad_as_html( $n, $_ == 1 ) );
         warn "Display ad $n as HTML\n";
     }
-    return $html;
+    my $margin = $self->{ads}{margin} || 0;
+    my $spacer = '';
+    return join( $spacer, @html );
 }
 
 #------------------------------------------------------------------------------
@@ -1397,7 +1497,7 @@ sub _setup_admin_urls
     $self->{abs_admin_url} = 
         lc( $proto ) . '://' .
         $ENV{SERVER_NAME} .
-        ( $ENV{SERVER_PORT} != 80 ? ":$ENV{SERVER_PORT}" : '' ) .
+        # ( $ENV{SERVER_PORT} != 80 ? ":$ENV{SERVER_PORT}" : '' ) .
         $ENV{SCRIPT_NAME} .
         ( $ENV{PATH_INFO} ? $ENV{PATH_INFO} : '' ) .
         ( $ENV{QUERY_STRING} ? "?$ENV{QUERY_STRING}" : '' )
@@ -1722,6 +1822,10 @@ sub output
             {
                 $self->_edit_ad();
             }
+            elsif ( $self->{formdata}{action} eq 'change log usage' )
+            {
+                $self->_change_log_usage();
+            }
             elsif ( $self->{formdata}{action} eq 'change margin' )
             {
                 $self->_change_margin();
@@ -1739,7 +1843,7 @@ sub output
                 $self->_delete_ad();
             }
         }
-        if ( defined $self->{formdata}{'log'} )
+        if ( defined $self->{formdata}{'display_log'} )
         {
             $self->_http_header( 'text/plain' );
             my $logfile = $self->_logfile();
@@ -1819,6 +1923,10 @@ campaign. It includes links to edit / delete individual adverts, and to change
 advert attributes for the whole campaign (the no. of ads to display
 simultaneously, the image margin in pixels). It also includes reports on the
 usage stats (page impressions / clickthroughs) for each advert in the campaign.
+
+The "Log usage" attribute determines whether ad usage (page impressions /
+clickthroughs are logged, and stats accumulated). The default for this is "Yes"
+for a new campaign.
 
 The "No. of ads to display" attribute allows campaigns with multiple images to
 be displayed simultaneously (side-by-side). The number of ads displayed >= the
