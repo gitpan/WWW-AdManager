@@ -3,6 +3,9 @@
 # CVS Log
 #
 # $Log: AdManager.pm,v $
+# Revision 1.14  2001/10/29 10:52:47  wrigley
+# v0.007 - minimal test added
+#
 # Revision 1.13  2001/10/26 14:40:52  wrigley
 # v0.006
 #
@@ -146,7 +149,7 @@ use vars qw( $VERSION %OPTIONS $WINDOW_PADDING $MAX_MARGIN );
 
 $WINDOW_PADDING = 20;
 $MAX_MARGIN = 20;
-$VERSION = '0.006';
+$VERSION = '0.007';
 
 #==============================================================================
 #
